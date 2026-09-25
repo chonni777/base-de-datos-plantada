@@ -1,0 +1,442 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Estadísticas de la web</title>
+
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      margin: 0;
+      padding: 30px;
+      background: #111827;
+      color: white;
+    }
+
+    h1 {
+      text-align: center;
+      margin-bottom: 30px;
+    }
+
+    .stats {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 20px;
+      max-width: 1000px;
+      margin: auto;
+    }
+
+    .card {
+      background: #1f2937;
+      border-radius: 15px;
+      padding: 25px;
+      text-align: center;
+    }
+
+    .card h2 {
+      margin: 0 0 10px;
+      font-size: 16px;
+      color: #9ca3af;
+    }
+
+    .number {
+      font-size: 35px;
+      font-weight: bold;
+    }
+
+    .panel {
+      background: #1f2937;
+      border-radius: 15px;
+      padding: 25px;
+      max-width: 1000px;
+      margin: 20px auto 0;
+      box-sizing: border-box;
+      overflow-x: auto;
+    }
+
+    .panel h2 {
+      margin: 0 0 15px;
+      font-size: 16px;
+      color: #9ca3af;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+
+    th, td {
+      text-align: left;
+      padding: 10px;
+      border-bottom: 1px solid #374151;
+    }
+
+    th {
+      color: #9ca3af;
+      font-weight: normal;
+    }
+
+    td:last-child, th:last-child {
+      text-align: right;
+    }
+
+    .visitor-row {
+      cursor: pointer;
+    }
+
+    .visitor-row:hover {
+      background: #273244;
+    }
+
+    .arrow {
+      display: inline-block;
+      font-size: 11px;
+      color: #9ca3af;
+      margin-right: 6px;
+      transition: transform 0.15s;
+    }
+
+    .visitor-row.open .arrow {
+      transform: rotate(90deg);
+    }
+
+    .visit-details td {
+      text-align: left;
+      background: #172033;
+      color: #d1d5db;
+    }
+
+    .visit-details ul {
+      margin: 0;
+      padding-left: 30px;
+      max-height: 250px;
+      overflow-y: auto;
+    }
+
+    .visit-details li {
+      padding: 3px 0;
+    }
+  </style>
+</head>
+<script>
+const SUPABASE_URL =
+  "https://swgyelvyrohegzpvcscq.supabase.co";
+
+const SUPABASE_KEY =
+  "sb_publishable_FDOGYwx-pnkmlb8iRodPhQ_1886mbIW";
+
+const supabaseClient = supabase.createClient(
+  SUPABASE_URL,
+  SUPABASE_KEY
+);
+
+async function login() {
+    
+
+  const email =
+    document.getElementById("email").value.trim();
+
+  const password =
+    document.getElementById("password").value;
+
+  const { data, error } =
+    await supabaseClient.auth.signInWithPassword({
+      email,
+      password
+    });
+
+  if (error) {
+    document.getElementById("loginError").textContent =
+      "❌ " + error.message;
+
+    return;
+  }
+
+  document.getElementById("loginPanel").style.display = "none";
+  document.getElementById("dashboard").style.display = "block";
+
+  cargarEstadisticas();
+}
+
+async function cargarEstadisticas() {
+
+  // Visitantes únicos
+  const { count: uniqueVisitors, error: visitorsError } =
+    await supabaseClient
+      .from("visitors")
+      .select("*", {
+        count: "exact",
+        head: true
+      });
+
+  if (visitorsError) {
+    console.error(visitorsError);
+    return;
+  }
+
+  // Visitas totales
+  const { count: totalVisits, error: visitsError } =
+    await supabaseClient
+      .from("visits")
+      .select("*", {
+        count: "exact",
+        head: true
+      });
+
+  if (visitsError) {
+    console.error(visitsError);
+    return;
+  }
+
+  document.getElementById("uniqueVisitors").textContent =
+    uniqueVisitors ?? 0;
+
+  document.getElementById("totalVisits").textContent =
+    totalVisits ?? 0;
+
+  // Todas las visitas (paginando de 1000 en 1000)
+  const visitas = [];
+  for (let desde = 0; ; desde += 1000) {
+    const { data, error } =
+      await supabaseClient
+        .from("visits")
+        .select(`${COL_FECHA}, ${COL_VISITANTE}`)
+        .order(COL_FECHA, { ascending: false })
+        .range(desde, desde + 999);
+
+    if (error) {
+      console.error(error);
+      return;
+    }
+
+    visitas.push(...data);
+    if (data.length < 1000) break;
+  }
+
+  // Hoy, ayer y esta semana (desde el lunes), en hora local
+  const hoy = new Date();
+  hoy.setHours(0, 0, 0, 0);
+
+  const ayer = new Date(hoy);
+  ayer.setDate(ayer.getDate() - 1);
+
+  const lunes = new Date(hoy);
+  lunes.setDate(lunes.getDate() - ((lunes.getDay() + 6) % 7));
+
+  let visitasHoy = 0, visitasAyer = 0, visitasSemana = 0;
+  const porVisitante = {};
+  const porDia = {};
+
+  for (const v of visitas) {
+    const fecha = new Date(v[COL_FECHA]);
+
+    if (fecha >= hoy) visitasHoy++;
+    else if (fecha >= ayer) visitasAyer++;
+    if (fecha >= lunes) visitasSemana++;
+
+    const quien = v[COL_VISITANTE] ?? "Desconocido";
+    (porVisitante[quien] ??= []).push(fecha);
+
+    const dia = claveDia(fecha);
+    porDia[dia] = (porDia[dia] || 0) + 1;
+  }
+
+  document.getElementById("todayVisits").textContent = visitasHoy;
+  document.getElementById("yesterdayVisits").textContent = visitasAyer;
+  document.getElementById("weekVisits").textContent = visitasSemana;
+
+  // Nicknames de los visitantes
+  const nicknames = {};
+  for (let desde = 0; ; desde += 1000) {
+    const { data, error } =
+      await supabaseClient
+        .from("visitors")
+        .select("id, nickname")
+        .range(desde, desde + 999);
+
+    if (error) {
+      console.error(error);
+      break;
+    }
+
+    for (const v of data) nicknames[v.id] = v.nickname;
+    if (data.length < 1000) break;
+  }
+
+  // Tabla: quién ha sido y cuántas veces
+  // (las fechas ya vienen ordenadas de más reciente a más antigua)
+  const filas = Object.entries(porVisitante)
+    .sort((a, b) => b[1].length - a[1].length)
+    .map(([quien, fechas]) => `
+      <tr class="visitor-row">
+        <td><span class="arrow">▶</span> ${escapar(nicknames[quien] || "Anónimo")}</td>
+        <td>${formatearFecha(fechas[0])}</td>
+        <td>${fechas.length}</td>
+      </tr>
+      <tr class="visit-details" hidden>
+        <td colspan="3">
+          <ul>${fechas.map(f => `<li>${formatearFecha(f)}</li>`).join("")}</ul>
+        </td>
+      </tr>`)
+    .join("");
+
+  document.getElementById("visitorsTable").innerHTML =
+    filas || `<tr><td colspan="3">Sin visitas todavía</td></tr>`;
+
+  // Gráfico: visitas por día (últimos 14 días)
+  const etiquetas = [];
+  const valores = [];
+  for (let i = 13; i >= 0; i--) {
+    const d = new Date(hoy);
+    d.setDate(d.getDate() - i);
+    etiquetas.push(d.toLocaleDateString("es-ES", { day: "numeric", month: "short" }));
+    valores.push(porDia[claveDia(d)] || 0);
+  }
+
+  if (grafico) grafico.destroy();
+  grafico = new Chart(document.getElementById("visitsChart"), {
+    type: "bar",
+    data: {
+      labels: etiquetas,
+      datasets: [{
+        label: "Visitas",
+        data: valores,
+        backgroundColor: "#3b82f6",
+        borderRadius: 6
+      }]
+    },
+    options: {
+      plugins: { legend: { display: false } },
+      scales: {
+        x: { ticks: { color: "#9ca3af" }, grid: { display: false } },
+        y: {
+          beginAtZero: true,
+          ticks: { color: "#9ca3af", precision: 0 },
+          grid: { color: "#374151" }
+        }
+      }
+    }
+  });
+}
+
+// Nombres de columnas de la tabla "visits" (cámbialos si los tuyos son distintos)
+const COL_FECHA = "visited_at";
+const COL_VISITANTE = "visitor_id";
+
+let grafico = null;
+
+function claveDia(fecha) {
+  return `${fecha.getFullYear()}-${fecha.getMonth()}-${fecha.getDate()}`;
+}
+
+function formatearFecha(fecha) {
+  return fecha.toLocaleString("es-ES", {
+    weekday: "short",
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit"
+  });
+}
+
+// Desplegar / plegar las visitas de un usuario al hacer click
+document.addEventListener("click", (e) => {
+  const fila = e.target.closest(".visitor-row");
+  if (!fila) return;
+
+  const detalles = fila.nextElementSibling;
+  detalles.hidden = !detalles.hidden;
+  fila.classList.toggle("open", !detalles.hidden);
+});
+
+function escapar(texto) {
+  const div = document.createElement("div");
+  div.textContent = String(texto);
+  return div.innerHTML;
+}
+</script>
+
+
+<body>
+<div id="loginPanel" class="card" style="max-width:400px;margin:50px auto;">
+  <h2>🔐 Panel privado</h2>
+
+  <input
+    type="email"
+    id="email"
+    placeholder="Correo electrónico"
+    style="width:100%;padding:12px;margin:8px 0;box-sizing:border-box;"
+  >
+
+  <input
+    type="password"
+    id="password"
+    placeholder="Contraseña"
+    style="width:100%;padding:12px;margin:8px 0;box-sizing:border-box;"
+  >
+
+  <button onclick="login()" style="padding:12px 20px;">
+    Entrar
+  </button>
+
+  <p id="loginError"></p>
+</div>
+
+<div id="dashboard" style="display:none;">
+
+  <h1>📊 Estadísticas de la web</h1>
+
+  <div class="stats">
+
+    <div class="card">
+      <h2>👥 Visitantes únicos</h2>
+      <div class="number" id="uniqueVisitors">...</div>
+    </div>
+
+    <div class="card">
+      <h2>👀 Visitas totales</h2>
+      <div class="number" id="totalVisits">...</div>
+    </div>
+
+    <div class="card">
+      <h2>📅 Visitas hoy</h2>
+      <div class="number" id="todayVisits">...</div>
+    </div>
+
+    <div class="card">
+      <h2>📅 Visitas ayer</h2>
+      <div class="number" id="yesterdayVisits">...</div>
+    </div>
+
+    <div class="card">
+      <h2>🗓️ Visitas esta semana</h2>
+      <div class="number" id="weekVisits">...</div>
+    </div>
+
+  </div>
+
+  <div class="panel">
+    <h2>📈 Visitas por día (últimos 14 días)</h2>
+    <canvas id="visitsChart"></canvas>
+  </div>
+
+  <div class="panel">
+    <h2>🕵️ Quién ha visitado y cuántas veces</h2>
+    <table>
+      <thead>
+        <tr><th>Visitante</th><th>Última visita</th><th>Visitas</th></tr>
+      </thead>
+      <tbody id="visitorsTable">
+        <tr><td colspan="3">Cargando...</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+</div>
+
+</body>
+</html>
