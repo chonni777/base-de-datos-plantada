@@ -130,7 +130,14 @@ const SUPABASE_KEY =
 
 const supabaseClient = supabase.createClient(
   SUPABASE_URL,
-  SUPABASE_KEY
+  SUPABASE_KEY,
+  {
+    auth: {
+      persistSession: true,
+      autoRefreshToken: true,
+      detectSessionInUrl: true
+    }
+  }
 );
 
 async function login() {
@@ -159,6 +166,27 @@ async function login() {
   document.getElementById("dashboard").style.display = "block";
 
   cargarEstadisticas();
+}
+
+async function comprobarSesion() {
+
+  const {
+    data: { session }
+  } = await supabaseClient.auth.getSession();
+
+  if (session) {
+
+    document.getElementById("loginPanel").style.display = "none";
+    document.getElementById("dashboard").style.display = "block";
+
+    await cargarEstadisticas();
+
+  } else {
+
+    document.getElementById("loginPanel").style.display = "block";
+    document.getElementById("dashboard").style.display = "none";
+
+  }
 }
 
 async function cargarEstadisticas() {
@@ -358,16 +386,20 @@ function escapar(texto) {
   div.textContent = String(texto);
   return div.innerHTML;
 }
+document.addEventListener("DOMContentLoaded", comprobarSesion);
 </script>
 
 
 <body>
-<div id="loginPanel" class="card" style="max-width:400px;margin:50px auto;">
+<div id="loginPanel" class="card" style="max-width:400px;margin:50px auto;display:none;">
   <h2>🔐 Panel privado</h2>
 
+  <form onsubmit="event.preventDefault(); login();">
   <input
     type="email"
     id="email"
+    name="email"
+    autocomplete="username"
     placeholder="Correo electrónico"
     style="width:100%;padding:12px;margin:8px 0;box-sizing:border-box;"
   >
@@ -375,13 +407,16 @@ function escapar(texto) {
   <input
     type="password"
     id="password"
+    name="password"
+    autocomplete="current-password"
     placeholder="Contraseña"
     style="width:100%;padding:12px;margin:8px 0;box-sizing:border-box;"
   >
 
-  <button onclick="login()" style="padding:12px 20px;">
+  <button type="submit" style="padding:12px 20px;">
     Entrar
   </button>
+  </form>
 
   <p id="loginError"></p>
 </div>
